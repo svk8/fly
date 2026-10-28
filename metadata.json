@@ -1,0 +1,6 @@
+{
+  "name": "P2P Crowdshipping Telegram Bot & Workbench",
+  "description": "Full-stack Telegram bot solution for P2P parcel and document delivery via travelers (aiogram 3.x, SQLAlchemy, APScheduler) with interactive simulator and deployable codebase.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
