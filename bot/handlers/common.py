@@ -2,6 +2,7 @@
 Common Handlers: /start, Disclaimer Acceptance, Profile, Safety Rules, and Navigation.
 """
 
+from html import escape
 from datetime import datetime
 from aiogram import Router, F, Bot
 from aiogram.types import Message, CallbackQuery
@@ -67,7 +68,7 @@ async def handle_start(message: Message, state: FSMContext) -> None:
         # Check if disclaimer is accepted
         if not user.disclaimer_accepted:
             welcome_text = (
-                f"👋 Здравствуйте, <b>{telegram_user.first_name}</b>!\n\n"
+                f"👋 Здравствуйте, <b>{escape(telegram_user.first_name)}</b>!\n\n"
                 f"Добро пожаловать в сервис <b>P2P-доставки посылок и документов через путешественников</b>!\n\n"
                 f"⚠️ <b>ВНИМАНИЕ: ПРАВИЛА БЕЗОПАСНОСТИ</b>\n"
                 f"Для использования сервиса вы обязаны принять регламент безопасности:\n\n"
@@ -85,7 +86,7 @@ async def handle_start(message: Message, state: FSMContext) -> None:
 
     # If disclaimer already accepted, show main menu
     await message.answer(
-        f"👋 Рады видеть вас снова, <b>{telegram_user.first_name}</b>!\n"
+        f"👋 Рады видеть вас снова, <b>{escape(telegram_user.first_name)}</b>!\n"
         f"Чем вы хотите заняться сегодня?",
         reply_markup=get_main_menu_keyboard(),
         parse_mode="HTML"
@@ -187,10 +188,10 @@ async def handle_profile(message: Message) -> None:
 
         profile_text = (
             f"👤 <b>ВАШ ПРОФИЛЬ</b>\n\n"
-            f"Имя: <b>{user.full_name}</b>\n"
+            f"Имя: <b>{escape(user.full_name)}</b>\n"
             f"Username: @{user.username or 'не указан'}\n"
             f"Telegram ID: <code>{user.telegram_id}</code>\n\n"
-            f"⭐ Рейтинг: <b>{user.rating:.1f} / 5.0</b>\n"
+            "⭐ Оценки пока недоступны\n"
             f"📦 Завершено доставок: <b>{user.completed_deliveries}</b>\n"
             f"🛡️ Правила досмотра: {'✅ Приняты' if user.disclaimer_accepted else '❌ Не приняты'}\n\n"
             f"Текущая роль: <b>{role_labels.get(user.role, 'Не указана')}</b>\n\n"

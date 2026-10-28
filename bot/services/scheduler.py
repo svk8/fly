@@ -1,3 +1,4 @@
+from services.clock import today
 """
 Background Task Scheduler using APScheduler.
 Handles automated expiration of old trips and reminders.
@@ -9,6 +10,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from sqlalchemy import update, and_
 from aiogram import Bot
 
+from config import settings
 from database.db import get_db_session
 from database.models import TravelTrip, ParcelRequest, TripStatus, ParcelStatus
 
@@ -19,8 +21,8 @@ scheduler = AsyncIOScheduler()
 
 async def archive_expired_entries(bot: Bot) -> None:
     """Archive trips and parcel requests that have passed their target dates."""
-    today = date.today()
-    logger.info(f"Running scheduler sweep for expired records on {today}...")
+    current_day = today()
+    logger.info(f"Running scheduler sweep for expired records on {current_day}...")
 
     async with get_db_session() as session:
         # 1. Update expired trips
@@ -29,7 +31,7 @@ async def archive_expired_entries(bot: Bot) -> None:
             .where(
                 and_(
                     TravelTrip.status == TripStatus.ACTIVE,
-                    TravelTrip.departure_date < today
+                    TravelTrip.departure_date < current_day
                 )
             )
             .values(status=TripStatus.COMPLETED)
@@ -42,7 +44,7 @@ async def archive_expired_entries(bot: Bot) -> None:
             .where(
                 and_(
                     ParcelRequest.status == ParcelStatus.SEARCHING,
-                    ParcelRequest.deadline_date < today
+                    ParcelRequest.deadline_date < current_day
                 )
             )
             .values(status=ParcelStatus.CANCELLED)
@@ -57,6 +59,7 @@ async def archive_expired_entries(bot: Bot) -> None:
 
 def start_scheduler(bot: Bot) -> None:
     """Configure and start the background scheduler."""
+    scheduler.configure(timezone=settings.TIMEZONE)
     scheduler.add_job(
         archive_expired_entries,
         trigger="cron",

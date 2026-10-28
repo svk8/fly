@@ -6,3 +6,12 @@ coverage/
 *.log
 .env*
 !.env.example
+
+.idea/
+.venv/
+__pycache__/
+*.pyc
+data/
+backups/
+*.sqlite*
+*.db*

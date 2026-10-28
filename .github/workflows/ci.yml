@@ -1,0 +1,82 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  web:
+    name: Web checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - name: Check TypeScript
+        run: npm run lint
+      - name: Test API proxy
+        run: npm test
+      - name: Build frontend
+        run: npm run build
+
+  bot:
+    name: Bot tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      BOT_TOKEN: '123456:TEST_TOKEN'
+      APP_URL: https://example.com
+      BOT_POLLING: 'false'
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: bot/requirements.txt
+      - run: python -m pip install -r bot/requirements.txt
+      - name: Check dependency compatibility
+        run: python -m pip check
+      - name: Test bot, shared API, drafts and notifications
+        run: python -m unittest discover -s bot/tests -v
+
+  containers:
+    name: Docker integration
+    needs: [web, bot]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      BOT_TOKEN: '123456:TEST_TOKEN'
+      APP_URL: ''
+      DOMAIN: localhost
+      BOT_POLLING: 'false'
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Validate local Compose
+        run: docker compose config --quiet
+      - name: Validate production Compose
+        run: docker compose --profile production config --quiet
+      - name: Build bot image
+        run: docker build --target bot --tag flyparcel-ci:bot .
+      - name: Build web image
+        run: docker build --target web --tag flyparcel-ci:web .
+      - name: Verify containers work together
+        run: python3 .github/scripts/container_smoke.py

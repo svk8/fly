@@ -1,0 +1,65 @@
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+services:
+  bot:
+    build:
+      context: .
+      target: bot
+    restart: unless-stopped
+    init: true
+    environment:
+      BOT_TOKEN: ${BOT_TOKEN:?Set BOT_TOKEN in .env}
+      APP_URL: ${APP_URL:-}
+      DATABASE_URL: sqlite+aiosqlite:////app/data/crowdship.db
+      ADMIN_IDS: ${ADMIN_IDS:-}
+      DEBUG: ${DEBUG:-false}
+      TIMEZONE: ${TIMEZONE:-Europe/Moscow}
+      BOT_POLLING: ${BOT_POLLING:-true}
+      API_HOST: 0.0.0.0
+      API_PORT: 8000
+    volumes:
+      - bot_data:/app/data
+      - ./backups:/app/backups
+    expose:
+      - "8000"
+    logging: *logging
+  app:
+    build:
+      context: .
+      target: web
+    restart: unless-stopped
+    init: true
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      BOT_API_URL: http://bot:8000
+    ports:
+      - "127.0.0.1:${WEB_PORT:-3000}:3000"
+    depends_on:
+      bot:
+        condition: service_healthy
+    logging: *logging
+  proxy:
+    profiles: [production]
+    image: caddy:2-alpine
+    restart: unless-stopped
+    environment:
+      DOMAIN: ${DOMAIN:-localhost}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      app:
+        condition: service_healthy
+    logging: *logging
+volumes:
+  bot_data:
+  caddy_data:
+  caddy_config:

@@ -11,7 +11,7 @@ from sqlalchemy import select, func, update
 
 from config import settings
 from database.db import get_db_session
-from database.models import User, TravelTrip, ParcelRequest, MatchDeal, TripStatus, ParcelStatus
+from database.models import User, TravelTrip, ParcelRequest, DeliveryDeal, TripStatus, ParcelStatus
 
 logger = logging.getLogger(__name__)
 router = Router(name="admin_router")
@@ -35,7 +35,7 @@ async def handle_admin_panel(message: Message) -> None:
         banned_count = (await session.execute(select(func.count(User.id)).where(User.is_banned == True))).scalar() or 0
         active_trips = (await session.execute(select(func.count(TravelTrip.id)).where(TravelTrip.status == TripStatus.ACTIVE))).scalar() or 0
         active_parcels = (await session.execute(select(func.count(ParcelRequest.id)).where(ParcelRequest.status == ParcelStatus.SEARCHING))).scalar() or 0
-        total_deals = (await session.execute(select(func.count(MatchDeal.id)))).scalar() or 0
+        total_deals = (await session.execute(select(func.count(DeliveryDeal.id)))).scalar() or 0
 
     text = (
         f"👑 <b>ПАНЕЛЬ АДМИНИСТРАТОРА CROWDSHIP</b>\n\n"

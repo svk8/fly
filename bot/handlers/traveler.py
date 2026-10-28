@@ -1,10 +1,11 @@
+from services.clock import today
 """
 Traveler Handlers: Trip creation FSM, active trips management.
 """
 
 from datetime import datetime, date
 import logging
-from aiogram import Router, F
+from aiogram import Router, F, Bot
 from aiogram.types import Message, CallbackQuery
 from aiogram.fsm.context import FSMContext
 from sqlalchemy import select, update
@@ -33,7 +34,7 @@ def parse_date_input(text: str) -> date | None:
             d = datetime.strptime(text, fmt).date()
             if fmt == "%d.%m":
                 d = d.replace(year=datetime.now().year)
-                if d < date.today():
+                if d < today():
                     d = d.replace(year=datetime.now().year + 1)
             return d
         except ValueError:
@@ -99,7 +100,7 @@ async def process_quick_date(callback: CallbackQuery, state: FSMContext) -> None
     """Process quick date selection."""
     date_str = callback.data.split(":")[1]
     parsed_date = parse_date_input(date_str)
-    if not parsed_date or parsed_date < date.today():
+    if not parsed_date or parsed_date < today():
         await callback.answer("Выбранная дата уже прошла. Выберите актуальную дату.", show_alert=True)
         return
 
@@ -127,7 +128,7 @@ async def process_text_date(message: Message, state: FSMContext) -> None:
         )
         return
 
-    if parsed_date < date.today():
+    if parsed_date < today():
         await message.answer("Дата вылета не может быть в прошлом. Введите будущую дату:")
         return
 
@@ -206,7 +207,7 @@ async def process_reward(message: Message, state: FSMContext) -> None:
 
 
 @router.callback_query(TravelerStates.confirm_trip, F.data == "confirm_trip_yes")
-async def commit_trip(callback: CallbackQuery, state: FSMContext) -> None:
+async def commit_trip(callback: CallbackQuery, state: FSMContext, bot: Bot) -> None:
     """Save trip to database and run immediate match search."""
     data = await state.get_data()
     telegram_id = callback.from_user.id
@@ -231,6 +232,9 @@ async def commit_trip(callback: CallbackQuery, state: FSMContext) -> None:
             status=TripStatus.ACTIVE
         )
         session.add(new_trip)
+        await session.flush()
+        from services.notifications import enqueue_listing
+        await enqueue_listing(session, "trip", new_trip.id)
         await session.commit()
         await session.refresh(new_trip)
 
@@ -273,13 +277,12 @@ async def cancel_trip_creation(callback: CallbackQuery, state: FSMContext) -> No
 async def handle_delete_trip(callback: CallbackQuery) -> None:
     """Cancel an active trip."""
     trip_id = int(callback.data.split(":")[1])
-    async with get_db_session() as session:
-        stmt = (
-            update(TravelTrip)
-            .where(TravelTrip.id == trip_id)
-            .values(status=TripStatus.CANCELLED)
-        )
-        await session.execute(stmt)
+    from services.marketplace import cancel_listing, MarketplaceError
+    try:
+        await cancel_listing(callback.from_user.id, "trip", trip_id)
+    except MarketplaceError as error:
+        await callback.answer(str(error), show_alert=True)
+        return
 
     await callback.message.edit_text("❌ Рейс успешно отменен и удален из активного поиска.")
     await callback.answer("Рейс отменен")

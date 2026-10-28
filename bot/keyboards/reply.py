@@ -20,6 +20,7 @@ def get_main_menu_keyboard() -> ReplyKeyboardMarkup:
         ])
 
     keyboard.extend([
+        [KeyboardButton(text="🤝 Мои сделки")],
         [
             KeyboardButton(text="✈️ Я лечу (Добавить рейс)"),
             KeyboardButton(text="📦 Передать посылку")

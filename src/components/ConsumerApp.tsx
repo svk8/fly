@@ -1,3 +1,4 @@
+import { apiFetch } from '../api';
 import React, { useState, useEffect } from 'react';
 import {
   Plane,
@@ -30,7 +31,7 @@ export interface TripItem {
   userId: number;
   userName: string;
   userHandle: string;
-  userRating: number;
+  userRating: number | null;
   completedTrips: number;
   fromCity: string;
   toCity: string;
@@ -46,7 +47,7 @@ export interface ParcelItem {
   senderId: number;
   senderName: string;
   senderHandle: string;
-  senderRating: number;
+  senderRating: number | null;
   fromCity: string;
   toCity: string;
   deadlineDate: string;
@@ -60,8 +61,11 @@ export interface ParcelItem {
 
 export interface DealItem {
   id: number;
-  parcelId: number;
-  tripId: number;
+  parcelId: number | null;
+  tripId: number | null;
+  senderId: number;
+  travelerId: number;
+  confirmationUserId: number;
   senderName: string;
   senderHandle: string;
   travelerName: string;
@@ -110,10 +114,13 @@ export const ConsumerApp: React.FC<ConsumerAppProps> = ({
   const [formCategory, setFormCategory] = useState('Документы');
   const [formWeight, setFormWeight] = useState('до 1 кг');
   const [formReward, setFormReward] = useState('3000');
-  const [formDate, setFormDate] = useState('30.10.2026');
+  const [formDate, setFormDate] = useState(() => new Date().toLocaleDateString('ru-RU'));
+  const [loadError, setLoadError] = useState('');
   const [formDescription, setFormDescription] = useState('');
   const [formSafetyCheck, setFormSafetyCheck] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [pendingDeal, setPendingDeal] = useState<number | null>(null);
+  const [matching, setMatching] = useState(false);
 
   // Telegram User detection
   const tgUser = (window as any).Telegram?.WebApp?.initDataUnsafe?.user;
@@ -137,16 +144,16 @@ export const ConsumerApp: React.FC<ConsumerAppProps> = ({
   const fetchData = async () => {
     try {
       const [tripsRes, parcelsRes, dealsRes] = await Promise.all([
-        fetch('/api/trips').then(r => r.json()).catch(() => ({ trips: [] })),
-        fetch('/api/parcels').then(r => r.json()).catch(() => ({ parcels: [] })),
-        fetch('/api/deals').then(r => r.json()).catch(() => ({ deals: [] }))
+        apiFetch('/api/trips').then(r => r.json()),
+        apiFetch('/api/parcels').then(r => r.json()),
+        apiFetch('/api/deals').then(r => r.json())
       ]);
 
       if (tripsRes.trips) setTrips(tripsRes.trips);
       if (parcelsRes.parcels) setParcels(parcelsRes.parcels);
       if (dealsRes.deals) setDeals(dealsRes.deals);
     } catch (e) {
-      console.error('Failed to load shared feed:', e);
+      setLoadError(e instanceof Error ? e.message : 'Не удалось загрузить заявки.');
     } finally {
       setLoading(false);
     }
@@ -202,10 +209,11 @@ export const ConsumerApp: React.FC<ConsumerAppProps> = ({
 
     try {
       if (postType === 'parcel') {
-        const res = await fetch('/api/parcels', {
+        const res = await apiFetch('/api/parcels', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
+            safetyAccepted: formSafetyCheck,
             senderName: currentUserName,
             senderHandle: currentUserHandle,
             fromCity: formFrom,
@@ -214,7 +222,7 @@ export const ConsumerApp: React.FC<ConsumerAppProps> = ({
             category: formCategory,
             weight: formWeight,
             description: formDescription || 'Срочная доставка в открытом виде.',
-            budget: Number(formReward) || 2500
+            budget: Number(formReward)
           })
         });
         const data = await res.json();
@@ -225,10 +233,11 @@ export const ConsumerApp: React.FC<ConsumerAppProps> = ({
           setFeedType('parcels');
         }
       } else {
-        const res = await fetch('/api/trips', {
+        const res = await apiFetch('/api/trips', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
+            safetyAccepted: formSafetyCheck,
             userName: currentUserName,
             userHandle: currentUserHandle,
             fromCity: formFrom,
@@ -249,7 +258,7 @@ export const ConsumerApp: React.FC<ConsumerAppProps> = ({
       }
     } catch (err) {
       console.error(err);
-      showToast('Ошибка публикации. Проверьте соединение.');
+      showToast(err instanceof Error ? err.message : 'Ошибка публикации.');
     } finally {
       setSubmitting(false);
     }
@@ -257,28 +266,24 @@ export const ConsumerApp: React.FC<ConsumerAppProps> = ({
 
   // Create match / deal
   const handleConfirmMatch = async () => {
+    if (matching) return;
     if (!matchAgreement) {
       alert('Подтвердите согласие с правилами досмотра.');
       return;
     }
 
+    setMatching(true);
     const targetParcel = selectedParcel;
     const targetTrip = selectedTrip;
 
     try {
       const dealPayload = {
-        parcelId: targetParcel ? targetParcel.id : 999,
-        tripId: targetTrip ? targetTrip.id : 999,
-        senderName: targetParcel ? targetParcel.senderName : currentUserName,
-        senderHandle: targetParcel ? targetParcel.senderHandle : currentUserHandle,
-        travelerName: targetTrip ? targetTrip.userName : currentUserName,
-        travelerHandle: targetTrip ? targetTrip.userHandle : currentUserHandle,
-        route: targetParcel ? `${targetParcel.fromCity} ➔ ${targetParcel.toCity}` : `${targetTrip?.fromCity} ➔ ${targetTrip?.toCity}`,
-        reward: targetParcel ? `${targetParcel.budget} ₽` : (targetTrip?.reward || 'По договоренности'),
-        category: targetParcel ? targetParcel.category : 'Посылка'
+        listingId: targetParcel?.id ?? targetTrip?.id,
+        listingType: targetParcel ? 'parcel' : 'trip',
+        safetyAccepted: matchAgreement
       };
 
-      const res = await fetch('/api/deals', {
+      const res = await apiFetch('/api/deals', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(dealPayload)
@@ -292,12 +297,32 @@ export const ConsumerApp: React.FC<ConsumerAppProps> = ({
       }
     } catch (err) {
       console.error(err);
-      showToast('Ошибка при отправке отклика.');
-    }
+      showToast(err instanceof Error ? err.message : 'Ошибка при отправке отклика.');
+    } finally { setMatching(false); }
+  };
+
+  const changeDealStatus = async (deal: DealItem) => {
+    if (pendingDeal !== null) return;
+    const transitions: Partial<Record<DealItem['status'], DealItem['status']>> = { matched: 'confirmed', confirmed: 'in_transit', in_transit: 'delivered' };
+    const next = transitions[deal.status];
+    if (!next) return;
+    if (next === 'in_transit' && !window.confirm('Вы лично осмотрели содержимое посылки в открытом виде и приняли ее для перевозки?')) return;
+    setPendingDeal(deal.id);
+    try {
+      const response = await apiFetch(`/api/deals/${deal.id}/status`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: next, inspectionDone: next === 'in_transit' })
+      });
+      const data = await response.json();
+      setDeals(prev => prev.map(item => item.id === deal.id ? data.deal : item));
+      showToast('Статус сделки обновлен.');
+    } catch (error) { showToast(error instanceof Error ? error.message : 'Не удалось обновить сделку.'); }
+    finally { setPendingDeal(null); }
   };
 
   return (
     <div className="flex flex-col min-h-screen bg-slate-950 text-slate-100 font-sans antialiased selection:bg-sky-500 selection:text-white">
+      {loadError && <div role="alert" className="p-4 bg-amber-950 text-amber-100 text-center">{loadError} <button className="underline" onClick={() => { setLoadError(''); setLoading(true); fetchData(); }}>Повторить</button></div>}
       {/* Toast notification */}
       {toastMessage && (
         <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 bg-emerald-500 text-white px-4 py-2.5 rounded-full shadow-2xl flex items-center gap-2 text-sm font-medium animate-bounce border border-emerald-400">
@@ -502,7 +527,7 @@ export const ConsumerApp: React.FC<ConsumerAppProps> = ({
                               <span className="text-xs font-medium text-slate-300">{p.senderName}</span>
                               <UserCheck className="w-3 h-3 text-emerald-400" />
                             </div>
-                            <span className="text-[10px] text-slate-500">@{p.senderHandle} • ⭐ {p.senderRating}</span>
+                            <span className="text-[10px] text-slate-500">@{p.senderHandle} • ⭐ {p.senderRating ?? 'нет оценок'}</span>
                           </div>
                         </div>
 
@@ -606,7 +631,7 @@ export const ConsumerApp: React.FC<ConsumerAppProps> = ({
                               <UserCheck className="w-3 h-3 text-emerald-400" />
                             </div>
                             <span className="text-[10px] text-slate-500">
-                              @{t.userHandle} • ⭐ {t.userRating} ({t.completedTrips} доставок)
+                              @{t.userHandle} • ⭐ {t.userRating ?? 'нет оценок'} ({t.completedTrips} доставок)
                             </span>
                           </div>
                         </div>
@@ -785,6 +810,9 @@ export const ConsumerApp: React.FC<ConsumerAppProps> = ({
                   </label>
                   <input
                     type="number"
+                    min="1"
+                    max="10000000"
+                    step="0.01"
                     required
                     value={formReward}
                     onChange={e => setFormReward(e.target.value)}
@@ -851,7 +879,10 @@ export const ConsumerApp: React.FC<ConsumerAppProps> = ({
         {activeTab === 'deals' && (
           <div className="space-y-3.5">
             <div className="bg-slate-900/80 p-3 rounded-2xl border border-slate-800/80">
-              <h2 className="text-base font-bold text-white">Мои сделки и отклики</h2>
+              <div className="flex items-center justify-between gap-2">
+                <h2 className="text-base font-bold text-white">Мои сделки и отклики</h2>
+                <button onClick={() => { setLoadError(''); fetchData(); }} className="text-xs text-sky-400 underline">Обновить</button>
+              </div>
               <p className="text-xs text-slate-400 mt-0.5">
                 Здесь фиксируются все договорённости между отправителями и попутчиками.
               </p>
@@ -889,7 +920,7 @@ export const ConsumerApp: React.FC<ConsumerAppProps> = ({
                   <div className="flex items-center gap-2">
                     <span className="text-[11px] bg-sky-500/20 text-sky-300 px-2.5 py-1 rounded-lg border border-sky-500/30 font-medium flex items-center gap-1">
                       <Clock className="w-3 h-3" />
-                      {d.status === 'matched' && 'Попутчик найден (ожидает встречи)'}
+                      {d.status === 'matched' && 'Отклик: ожидает подтверждения'}
                       {d.status === 'confirmed' && 'Встреча согласована'}
                       {d.status === 'in_transit' && 'Посылка в пути ✈️'}
                       {d.status === 'delivered' && 'Успешно доставлено ✅'}
@@ -923,10 +954,18 @@ export const ConsumerApp: React.FC<ConsumerAppProps> = ({
                     </ul>
                   </div>
 
+                  {((d.status === 'matched' && tgUser?.id === d.confirmationUserId) ||
+                    (d.status === 'confirmed' && tgUser?.id === d.travelerId) ||
+                    (d.status === 'in_transit' && tgUser?.id === d.senderId)) && (
+                    <button disabled={pendingDeal !== null} onClick={() => changeDealStatus(d)}
+                      className="w-full py-2 bg-emerald-600 text-white rounded-xl text-xs font-semibold disabled:opacity-50">
+                      {pendingDeal === d.id ? 'Сохраняем…' : d.status === 'matched' ? 'Подтвердить договоренность' : d.status === 'confirmed' ? 'Подтвердить досмотр и прием посылки' : 'Подтвердить доставку'}
+                    </button>
+                  )}
                   {/* Telegram Chat action */}
                   <div className="flex items-center gap-2 pt-1">
                     <a
-                      href={`https://t.me/${d.travelerHandle || d.senderHandle}`}
+                      href={(tgUser?.id === d.senderId ? d.travelerHandle : d.senderHandle) ? `https://t.me/${tgUser?.id === d.senderId ? d.travelerHandle : d.senderHandle}` : `tg://user?id=${tgUser?.id === d.senderId ? d.travelerId : d.senderId}`}
                       target="_blank"
                       rel="noreferrer"
                       className="flex-1 py-2 bg-sky-500 hover:bg-sky-400 text-white rounded-xl text-xs font-semibold text-center transition-all cursor-pointer flex items-center justify-center gap-1.5"
@@ -950,7 +989,7 @@ export const ConsumerApp: React.FC<ConsumerAppProps> = ({
               </div>
               <h2 className="text-base font-bold text-white">Безопасность и правила</h2>
               <p className="text-xs text-slate-400 mt-1">
-                FlyParcel объединяет проверенных попутчиков на принципах полной открытости.
+                FlyParcel помогает найти попутчиков и согласовать условия передачи посылки.
               </p>
             </div>
 
@@ -1140,7 +1179,7 @@ export const ConsumerApp: React.FC<ConsumerAppProps> = ({
               </button>
               <button
                 onClick={handleConfirmMatch}
-                disabled={!matchAgreement}
+                disabled={!matchAgreement || matching}
                 className="flex-1 py-2.5 bg-gradient-to-r from-sky-500 to-blue-600 hover:from-sky-400 hover:to-blue-500 text-white rounded-xl text-xs font-semibold shadow-md shadow-sky-500/20 transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 Подтвердить

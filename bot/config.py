@@ -4,18 +4,21 @@ Loads environment variables from .env file or system environment.
 """
 
 from typing import List
-from pydantic import Field, field_validator
+from pydantic import Field, AliasChoices
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
     BOT_TOKEN: str = Field(..., description="Telegram Bot API Token from @BotFather")
     DATABASE_URL: str = Field(
-        default="sqlite+aiosqlite:///./crowdship.db",
+        default="sqlite+aiosqlite:///./data/crowdship.db",
         description="Async SQLAlchemy database URL (PostgreSQL or SQLite)"
     )
     ADMIN_IDS_RAW: str = Field(default="", alias="ADMIN_IDS")
-    WEBAPP_URL: str = Field(default="", description="URL of Telegram Mini App (TMA) WebApp")
+    WEBAPP_URL: str = Field(default="", validation_alias=AliasChoices("APP_URL", "WEBAPP_URL"))
+    API_HOST: str = "0.0.0.0"
+    API_PORT: int = 8000
+    BOT_POLLING: bool = True
     DEBUG: bool = Field(default=False)
     TIMEZONE: str = Field(default="Europe/Moscow")
 

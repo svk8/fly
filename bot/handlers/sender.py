@@ -1,3 +1,4 @@
+from services.clock import today
 """
 Sender Handlers: Parcel request creation FSM, photo handling, and auto-matching trigger.
 """
@@ -23,7 +24,7 @@ from keyboards.inline import (
     get_confirm_parcel_keyboard,
     get_item_actions_keyboard
 )
-from services.matcher import normalize_city, notify_travelers_about_new_parcel
+from services.matcher import normalize_city, find_matching_trips_for_parcel
 from handlers.traveler import parse_date_input
 
 logger = logging.getLogger(__name__)
@@ -88,7 +89,7 @@ async def process_sender_quick_date(callback: CallbackQuery, state: FSMContext) 
     """Process quick deadline date."""
     date_str = callback.data.split(":")[1]
     parsed_date = parse_date_input(date_str)
-    if not parsed_date or parsed_date < date.today():
+    if not parsed_date or parsed_date < today():
         await callback.answer("Выбранная дата в прошлом. Выберите актуальную дату.", show_alert=True)
         return
 
@@ -113,7 +114,7 @@ async def process_sender_text_date(message: Message, state: FSMContext) -> None:
         await message.answer("Формат даты не распознан. Введите дату в виде <b>ДД.ММ.ГГГГ</b> (например: <i>10.11.2026</i>):", parse_mode="HTML")
         return
 
-    if parsed_date < date.today():
+    if parsed_date < today():
         await message.answer("Срок не может быть в прошлом. Введите будущую дату:")
         return
 
@@ -270,11 +271,14 @@ async def commit_parcel(callback: CallbackQuery, state: FSMContext, bot: Bot) ->
             status=ParcelStatus.SEARCHING
         )
         session.add(new_parcel)
+        await session.flush()
+        from services.notifications import enqueue_listing
+        await enqueue_listing(session, "parcel", new_parcel.id)
         await session.commit()
         await session.refresh(new_parcel)
 
-        # Trigger Smart Auto-Matching Notifications to Travelers!
-        notified_travelers = await notify_travelers_about_new_parcel(bot, new_parcel)
+        # The outbox handles delivery; this count is only a preview for the sender.
+        notified_travelers = len(await find_matching_trips_for_parcel(new_parcel))
 
     await state.clear()
     await callback.message.delete()
@@ -289,7 +293,7 @@ async def commit_parcel(callback: CallbackQuery, state: FSMContext, bot: Bot) ->
         text += (
             f"🎯 <b>УМНЫЙ АВТО-МЭТЧИНГ СРАБОТАЛ!</b>\n"
             f"Найдено подходящих попутчиков на маршруте: <b>{notified_travelers}</b>.\n"
-            f"Им направлены Push-уведомления с кнопкой согласия на доставку. "
+            f"Уведомления для попутчиков поставлены в очередь отправки. "
             f"Как только попутчик откликнется, бот пришлет вам защищенную ссылку на диалог!"
         )
     else:
@@ -315,13 +319,12 @@ async def cancel_parcel_creation(callback: CallbackQuery, state: FSMContext) -> 
 async def handle_delete_parcel(callback: CallbackQuery) -> None:
     """Cancel an active parcel."""
     parcel_id = int(callback.data.split(":")[1])
-    async with get_db_session() as session:
-        stmt = (
-            update(ParcelRequest)
-            .where(ParcelRequest.id == parcel_id)
-            .values(status=ParcelStatus.CANCELLED)
-        )
-        await session.execute(stmt)
+    from services.marketplace import cancel_listing, MarketplaceError
+    try:
+        await cancel_listing(callback.from_user.id, "parcel", parcel_id)
+    except MarketplaceError as error:
+        await callback.answer(str(error), show_alert=True)
+        return
 
     await callback.message.edit_text("❌ Заявка на посылку отменена и закрыта.")
     await callback.answer("Заявка закрыта")
