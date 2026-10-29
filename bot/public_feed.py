@@ -18,4 +18,6 @@ def public_card(data, kind):
     shared = ('id', 'fromCity', 'toCity', 'status', 'createdAt')
     fields = ('departureDate', 'capacity', 'reward', 'note') if kind == 'trips' else (
         'deadlineDate', 'category', 'weight', 'description', 'budget', 'currency')
-    return {key: public_text(data[key]) if isinstance(data[key], str) else data[key] for key in (*shared, *fields)}
+    trusted = {'id', 'createdAt', 'status', 'departureDate', 'deadlineDate'}
+    return {key: public_text(data[key]) if key not in trusted and isinstance(data[key], str) else data[key]
+        for key in (*shared, *fields)}

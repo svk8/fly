@@ -468,7 +468,10 @@ asyncio.run(check())
         self.assertIn('Документы', card['description'])
         for key in ('senderId', 'senderName', 'senderHandle', 'senderRating', 'photoFileId'):
             self.assertNotIn(key, card)
-        encoded = json.dumps(card)
+        from datetime import datetime
+        datetime.fromisoformat(card['createdAt'])
+        self.assertEqual(card['deadlineDate'], payload['deadlineDate'])
+        encoded = card['description']
         for contact in ('private_user', '999', 'email@example.com', 'https://t.me'):
             self.assertNotIn(contact, encoded)
         status, public_trips = await self.call('public/trips', user=None)
