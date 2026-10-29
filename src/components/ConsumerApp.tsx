@@ -336,12 +336,12 @@ export const ConsumerApp: React.FC<ConsumerAppProps> = ({
         <div className="max-w-md mx-auto flex items-center justify-between">
           <div className="flex items-center gap-2.5">
             <div className="w-9 h-9 rounded-xl overflow-hidden border border-sky-500/30 bg-sky-500/10 flex items-center justify-center shadow-sm">
-              <img src={botAvatarIcon} alt="FlyParcel" className="w-full h-full object-cover" />
+              <img src={botAvatarIcon} alt="Fly" className="w-full h-full object-cover" />
             </div>
             <div>
               <div className="flex items-center gap-1.5">
                 <span className="font-bold text-base tracking-tight text-white flex items-center gap-1">
-                  FlyParcel
+                  Fly
                   <span className="w-2 h-2 rounded-full bg-emerald-400 inline-block animate-pulse"></span>
                 </span>
                 <span className="text-[10px] font-semibold bg-sky-500/20 text-sky-400 px-1.5 py-0.5 rounded border border-sky-500/30">
