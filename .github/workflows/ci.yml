@@ -53,6 +53,8 @@ jobs:
       - run: python -m pip install -r bot/requirements.txt
       - name: Check dependency compatibility
         run: python -m pip check
+      - name: Test deployment sequencing and rollback
+        run: python -m unittest discover -s tests -p '*_test.py' -v
       - name: Test bot, shared API, drafts and notifications
         run: python -m unittest discover -s bot/tests -v
 
