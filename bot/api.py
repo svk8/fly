@@ -20,8 +20,10 @@ from services.marketplace import create_response, change_status, MarketplaceErro
 from services.matcher import normalize_city
 from services.notifications import enqueue_listing
 from monitoring import report_exception
+from public_feed import public_card
 
 logger = logging.getLogger(__name__)
+BOT_URL = web.AppKey("bot_url", str)
 
 
 def verify_init_data(raw, token, now=None):
@@ -125,6 +127,10 @@ def create_api(bot):
         try:
             if request.path in ("/api/health", "/api/client-config"):
                 return await handler(request)
+            if request.method == 'GET' and request.path in ('/api/public/trips', '/api/public/parcels'):
+                response = await handler(request)
+                response.headers['Cache-Control'] = 'no-store'
+                return response
             tg = verify_init_data(request.headers.get("X-Telegram-Init-Data", ""), settings.BOT_TOKEN)
             request["user"] = await ensure_user(tg)
             if request.method != "GET":
@@ -156,6 +162,7 @@ def create_api(bot):
             return web.json_response({"error": "Сервис временно недоступен."}, status=500)
 
     app = web.Application(middlewares=[middleware], client_max_size=32768)
+    app[BOT_URL] = "https://t.me/" + settings.BOT_USERNAME.lstrip("@")
 
     async def health(request):
         async with get_db_session() as session:
@@ -173,6 +180,8 @@ def create_api(bot):
                 items = (await session.scalars(select(ParcelRequest).join(User).where(ParcelRequest.status == ParcelStatus.SEARCHING,
                     ParcelRequest.deadline_date >= today(), User.is_banned.is_(False)).order_by(ParcelRequest.id.desc()).limit(500))).all()
                 data = [await parcel_json(session, item) for item in items]
+        if request.path.startswith("/api/public/"):
+            data = [public_card(item, kind) for item in data]
         return web.json_response({kind: data})
 
     async def create_listing(request):
@@ -260,11 +269,12 @@ def create_api(bot):
 
     async def client_config(request):
         return web.json_response({'dsn': settings.GLITCHTIP_FRONTEND_DSN,
-            'environment': settings.MONITORING_ENVIRONMENT, 'release': settings.RELEASE},
+            'environment': settings.MONITORING_ENVIRONMENT, 'release': settings.RELEASE, 'botUrl': app[BOT_URL]},
             headers={'Cache-Control': 'no-store'})
 
     app.router.add_get('/api/client-config', client_config)
     app.router.add_get('/api/health', health)
+    app.router.add_get('/api/public/{kind:trips|parcels}', listings)
     app.router.add_get('/api/{kind:trips|parcels}', listings)
     app.router.add_post('/api/{kind:trips|parcels}', create_listing)
     app.router.add_get('/api/deals', deals)

@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     )
     ADMIN_IDS_RAW: str = Field(default="", alias="ADMIN_IDS")
     WEBAPP_URL: str = Field(default="", validation_alias=AliasChoices("APP_URL", "WEBAPP_URL"))
+    BOT_USERNAME: str = "crowdship_p2p_bot"
     GLITCHTIP_DSN: str = ""
     GLITCHTIP_FRONTEND_DSN: str = ""
     MONITORING_ENVIRONMENT: str = "development"

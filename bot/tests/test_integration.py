@@ -435,7 +435,7 @@ asyncio.run(check())
     async def test_monitoring_client_config_is_public_and_has_no_private_settings(self):
         status, data = await self.call('client-config', user=None)
         self.assertEqual(status, 200)
-        self.assertEqual(set(data), {'dsn', 'environment', 'release'})
+        self.assertEqual(set(data), {'dsn', 'environment', 'release', 'botUrl'})
         self.assertNotIn(TOKEN, json.dumps(data))
 
     async def test_monitoring_scrubs_auth_request_and_local_variables(self):
@@ -451,6 +451,63 @@ asyncio.run(check())
         self.assertNotIn('private message', encoded)
         self.assertNotIn('secret', encoded)
         self.assertEqual(clean['exception']['values'][0]['type'], 'RuntimeError')
+
+
+    async def test_public_feed_has_cards_without_contact_information(self):
+        from database.models import ParcelDetails, TripDetails
+        await self.register_bot_user(2)
+        trip_id = await self.bot_trip(2)
+        payload = {**self.parcel_body(), 'description': 'Документы. Контакт: @private_user +7 (999) 123-45-67 email@example.com https://t.me/private_user'}
+        _, created = await self.call('parcels', 1, payload)
+        parcel_id = created['parcel']['id']
+        status, public = await self.call('public/parcels', user=None)
+        self.assertEqual(status, 200)
+        card = public['parcels'][0]
+        self.assertEqual(card['id'], parcel_id)
+        self.assertEqual(card['budget'], 2000)
+        self.assertIn('Документы', card['description'])
+        for key in ('senderId', 'senderName', 'senderHandle', 'senderRating', 'photoFileId'):
+            self.assertNotIn(key, card)
+        encoded = json.dumps(card)
+        for contact in ('private_user', '999', 'email@example.com', 'https://t.me'):
+            self.assertNotIn(contact, encoded)
+        status, public_trips = await self.call('public/trips', user=None)
+        self.assertEqual(status, 200)
+        trip = public_trips['trips'][0]
+        self.assertEqual(trip['id'], trip_id)
+        self.assertNotIn('userId', trip)
+        self.assertNotIn('userName', trip)
+        self.assertNotIn('userHandle', trip)
+        self.assertEqual((await self.call('parcels', user=None))[0], 401)
+        self.assertEqual((await self.call('deals', user=None))[0], 401)
+        self.assertEqual((await self.call('parcels', user=None, body=self.parcel_body()))[0], 401)
+        self.assertEqual((await self.call('public/parcels', user=None, body=self.parcel_body()))[0], 401)
+        # Public reads neither create a guest account nor expose withdrawn listings.
+        async with get_db_session() as session:
+            users = (await session.scalars(select(User))).all()
+            self.assertEqual(len(users), 2)
+        await cancel_listing(1, 'parcel', parcel_id)
+        self.assertEqual((await self.call('public/parcels', user=None))[1]['parcels'], [])
+        async with get_db_session() as session:
+            traveler = await session.scalar(select(User).where(User.telegram_id == 2))
+            traveler.is_banned = True
+        self.assertEqual((await self.call('public/trips', user=None))[1]['trips'], [])
+
+    async def test_bot_link_preserves_listing_through_first_start_and_disclaimer(self):
+        from aiogram.fsm.context import FSMContext
+        from aiogram.fsm.storage.base import StorageKey
+        from database.fsm import DatabaseStorage
+        from urllib.parse import urlsplit, parse_qs
+        context = FSMContext(DatabaseStorage(), StorageKey(bot_id=123456, chat_id=7, user_id=7))
+        entry = message(7)
+        entry.text = '/start parcel_42'
+        await handle_start(entry, context)
+        self.assertEqual((await context.get_data())['entry'], 'parcel_42')
+        accepted = callback(7)
+        await handle_accept_disclaimer(accepted, context)
+        launch = accepted.message.answer.call_args_list[-1].kwargs['reply_markup'].inline_keyboard[0][0].web_app.url
+        self.assertEqual(parse_qs(urlsplit(launch).query), {'listingType': ['parcel'], 'listingId': ['42']})
+        self.assertEqual(await context.get_data(), {})
 
 
 if __name__ == '__main__':

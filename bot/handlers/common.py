@@ -12,6 +12,7 @@ from sqlalchemy import select, update
 
 from database.db import get_db_session
 from database.models import User, UserRole
+from services.bot_entry import entry_params, send_entry
 from keyboards.reply import get_main_menu_keyboard
 from keyboards.inline import (
     get_disclaimer_keyboard,
@@ -43,6 +44,9 @@ SAFETY_TEXT = (
 async def handle_start(message: Message, state: FSMContext) -> None:
     """Handle /start command with user registration and disclaimer verification."""
     await state.clear()
+    payload = (message.text or '').partition(' ')[2].strip()
+    if entry_params(payload):
+        await state.update_data(entry=payload)
     telegram_user = message.from_user
     if not telegram_user:
         return
@@ -92,9 +96,13 @@ async def handle_start(message: Message, state: FSMContext) -> None:
         parse_mode="HTML"
     )
 
+    if entry_params(payload):
+        await send_entry(message, payload)
+        await state.set_data({})
+
 
 @router.callback_query(F.data == "accept_disclaimer")
-async def handle_accept_disclaimer(callback: CallbackQuery) -> None:
+async def handle_accept_disclaimer(callback: CallbackQuery, state: FSMContext | None = None) -> None:
     """Handle user accepting security disclaimer."""
     telegram_id = callback.from_user.id
 
@@ -116,6 +124,12 @@ async def handle_accept_disclaimer(callback: CallbackQuery) -> None:
         reply_markup=get_role_selector_keyboard(),
         parse_mode="HTML"
     )
+    if state is not None:
+        data = await state.get_data()
+        payload = data.pop('entry', '')
+        if entry_params(payload):
+            await send_entry(callback.message, payload)
+            await state.set_data(data)
     await callback.answer()
 
 

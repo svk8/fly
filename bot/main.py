@@ -18,7 +18,7 @@ from handlers.matching import router as matching_router
 from handlers.admin import router as admin_router
 from services.scheduler import start_scheduler, stop_scheduler
 from middleware import AccountMiddleware
-from api import create_api
+from api import create_api, BOT_URL
 from services.notification_worker import NotificationWorker
 from monitoring import init_monitoring, report_exception, flush_monitoring
 
@@ -42,8 +42,13 @@ async def main():
         dp.include_router(router)
     worker = NotificationWorker(bot)
     worker_task = None
-    runner = web.AppRunner(create_api(bot), access_log=None)
+    api = create_api(bot)
+    runner = web.AppRunner(api, access_log=None)
     try:
+        if settings.BOT_POLLING:
+            me = await bot.get_me()
+            if me.username:
+                api[BOT_URL] = "https://t.me/" + me.username
         await runner.setup()
         await web.TCPSite(runner, settings.API_HOST, settings.API_PORT).start()
         if settings.BOT_POLLING:

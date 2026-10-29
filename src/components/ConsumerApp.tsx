@@ -1,5 +1,7 @@
+import { botLink, DEFAULT_BOT_URL } from '../botLinks';
+import { TelegramAction } from './TelegramAction';
 import { apiFetch } from '../api';
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Plane,
   Package,
@@ -28,11 +30,11 @@ import botAvatarIcon from '../assets/images/bot_avatar_icon_1792998997746.jpg';
 
 export interface TripItem {
   id: number;
-  userId: number;
-  userName: string;
-  userHandle: string;
-  userRating: number | null;
-  completedTrips: number;
+  userId?: number;
+  userName?: string;
+  userHandle?: string;
+  userRating?: number | null;
+  completedTrips?: number;
   fromCity: string;
   toCity: string;
   departureDate: string;
@@ -44,10 +46,10 @@ export interface TripItem {
 
 export interface ParcelItem {
   id: number;
-  senderId: number;
-  senderName: string;
-  senderHandle: string;
-  senderRating: number | null;
+  senderId?: number;
+  senderName?: string;
+  senderHandle?: string;
+  senderRating?: number | null;
   fromCity: string;
   toCity: string;
   deadlineDate: string;
@@ -89,7 +91,10 @@ export const ConsumerApp: React.FC<ConsumerAppProps> = ({
 }) => {
   const [activeTab, setActiveTab] = useState<'explore' | 'post' | 'deals' | 'safety'>('explore');
   const [feedType, setFeedType] = useState<'parcels' | 'trips'>('parcels');
-  
+
+  const [botUrl, setBotUrl] = useState(DEFAULT_BOT_URL);
+  const entryOpened = useRef(false);
+
   // Data state
   const [trips, setTrips] = useState<TripItem[]>([]);
   const [parcels, setParcels] = useState<ParcelItem[]>([]);
@@ -124,8 +129,8 @@ export const ConsumerApp: React.FC<ConsumerAppProps> = ({
 
   // Telegram User detection
   const tgUser = (window as any).Telegram?.WebApp?.initDataUnsafe?.user;
-  const currentUserName = tgUser?.first_name 
-    ? `${tgUser.first_name} ${tgUser.last_name || ''}`.trim() 
+  const currentUserName = tgUser?.first_name
+    ? `${tgUser.first_name} ${tgUser.last_name || ''}`.trim()
     : 'Тестовый пользователь';
   const currentUserHandle = tgUser?.username || 'telegram_user';
 
@@ -143,11 +148,30 @@ export const ConsumerApp: React.FC<ConsumerAppProps> = ({
   // Fetch live shared data from backend
   const fetchData = async () => {
     try {
-      const [tripsRes, parcelsRes, dealsRes] = await Promise.all([
-        apiFetch('/api/trips').then(r => r.json()),
-        apiFetch('/api/parcels').then(r => r.json()),
-        apiFetch('/api/deals').then(r => r.json())
+      const prefix = isTelegramWebApp ? '/api' : '/api/public';
+      const [tripsRes, parcelsRes, dealsRes, config] = await Promise.all([
+        apiFetch(`${prefix}/trips`).then(r => r.json()),
+        apiFetch(`${prefix}/parcels`).then(r => r.json()),
+        isTelegramWebApp ? apiFetch('/api/deals').then(r => r.json()) : Promise.resolve({deals: []}),
+        apiFetch('/api/client-config').then(r => r.json()).catch(() => null)
       ]);
+      setLoadError('');
+      if (config?.botUrl) setBotUrl(botLink(config.botUrl));
+      if (isTelegramWebApp && !entryOpened.current) {
+        entryOpened.current = true;
+        const params = new URLSearchParams(window.location.search);
+        const type = params.get('listingType');
+        const id = Number(params.get('listingId'));
+        const item = type === 'parcel' ? parcelsRes.parcels?.find((p: ParcelItem) => p.id === id)
+          : type === 'trip' ? tripsRes.trips?.find((t: TripItem) => t.id === id) : null;
+        if (item) {
+          setSelectedParcel(type === 'parcel' ? item : null);
+          setSelectedTrip(type === 'trip' ? item : null);
+          setFeedType(type === 'parcel' ? 'parcels' : 'trips');
+          setMatchAgreement(false);
+          setMatchModalOpen(true);
+        }
+      }
 
       if (tripsRes.trips) setTrips(tripsRes.trips);
       if (parcelsRes.parcels) setParcels(parcelsRes.parcels);
@@ -171,13 +195,13 @@ export const ConsumerApp: React.FC<ConsumerAppProps> = ({
       } else if (tabParam === 'sender' || tabParam === 'parcel' || tabParam === 'parcels') {
         setActiveTab('explore');
         setFeedType('parcels');
-      } else if (tabParam === 'post_trip') {
+      } else if (isTelegramWebApp && tabParam === 'post_trip') {
         setActiveTab('post');
         setPostType('trip');
-      } else if (tabParam === 'post_parcel') {
+      } else if (isTelegramWebApp && tabParam === 'post_parcel') {
         setActiveTab('post');
         setPostType('parcel');
-      } else if (tabParam === 'deals') {
+      } else if (isTelegramWebApp && tabParam === 'deals') {
         setActiveTab('deals');
       } else if (tabParam === 'safety' || tabParam === 'rules') {
         setActiveTab('safety');
@@ -201,6 +225,7 @@ export const ConsumerApp: React.FC<ConsumerAppProps> = ({
   // Handle Post submission
   const handleSubmitPost = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!isTelegramWebApp) { window.location.assign(botLink(botUrl, `post_${postType}`)); return; }
     if (!formSafetyCheck) {
       alert('Пожалуйста, подтвердите согласие на открытый досмотр посылки.');
       return;
@@ -266,6 +291,7 @@ export const ConsumerApp: React.FC<ConsumerAppProps> = ({
 
   // Create match / deal
   const handleConfirmMatch = async () => {
+    if (!isTelegramWebApp) { window.location.assign(botLink(botUrl)); return; }
     if (matching) return;
     if (!matchAgreement) {
       alert('Подтвердите согласие с правилами досмотра.');
@@ -302,6 +328,7 @@ export const ConsumerApp: React.FC<ConsumerAppProps> = ({
   };
 
   const changeDealStatus = async (deal: DealItem) => {
+    if (!isTelegramWebApp) { window.location.assign(botLink(botUrl, 'deals')); return; }
     if (pendingDeal !== null) return;
     const transitions: Partial<Record<DealItem['status'], DealItem['status']>> = { matched: 'confirmed', confirmed: 'in_transit', in_transit: 'delivered' };
     const next = transitions[deal.status];
@@ -357,7 +384,7 @@ export const ConsumerApp: React.FC<ConsumerAppProps> = ({
             <div className="hidden xs:flex items-center gap-1.5 bg-slate-800/80 border border-slate-700/60 px-2.5 py-1 rounded-full text-xs">
               <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
               <span className="text-slate-300 font-medium truncate max-w-[90px]">
-                {tgUser?.first_name || 'Тест'}
+                {tgUser?.first_name || 'Гость'}
               </span>
             </div>
 
@@ -376,6 +403,10 @@ export const ConsumerApp: React.FC<ConsumerAppProps> = ({
         </div>
       </header>
 
+      {!isTelegramWebApp && <div className="max-w-md w-full mx-auto px-4 pt-3 text-xs text-slate-300">
+        Лента доступна всем. Публикация, контакты и отклики — в Telegram.
+        <a href={botLink(botUrl)} className="ml-1 text-sky-400 underline">Открыть бота</a>
+      </div>}
       {/* Main Body */}
       <main className="flex-1 max-w-md w-full mx-auto pb-24 px-4 pt-3">
         {/* ======================= TAB 1: EXPLORE & FEED ======================= */}
@@ -466,17 +497,19 @@ export const ConsumerApp: React.FC<ConsumerAppProps> = ({
                   <span>Найдено: {filteredParcels.length}</span>
                 </div>
 
-                {filteredParcels.length === 0 ? (
+                {loading ? <p role="status" className="text-center p-8 text-slate-400">Загружаем посылки…</p>
+                  : loadError ? <p className="text-center p-8 text-slate-400">Не удалось загрузить ленту. Нажмите «Повторить».</p>
+                  : filteredParcels.length === 0 ? (
                   <div className="text-center py-12 bg-slate-900/40 rounded-2xl border border-dashed border-slate-800 p-6">
                     <Package className="w-10 h-10 text-slate-600 mx-auto mb-2" />
                     <p className="text-sm font-medium text-slate-300">Посылок не найдено</p>
                     <p className="text-xs text-slate-500 mt-1">Попробуйте изменить города в фильтре или создайте заявку первым</p>
-                    <button
+                    <TelegramAction isTelegram={isTelegramWebApp} botUrl={botUrl} action="post_parcel"
                       onClick={() => setActiveTab('post')}
                       className="mt-4 px-4 py-2 bg-sky-500 text-white rounded-xl text-xs font-medium cursor-pointer"
                     >
                       + Разместить посылку
-                    </button>
+                    </TelegramAction>
                   </div>
                 ) : (
                   filteredParcels.map(p => (
@@ -520,19 +553,19 @@ export const ConsumerApp: React.FC<ConsumerAppProps> = ({
                       <div className="flex items-center justify-between pt-1">
                         <div className="flex items-center gap-2">
                           <div className="w-6 h-6 rounded-full bg-sky-500/20 text-sky-300 text-xs font-bold flex items-center justify-center border border-sky-500/30">
-                            {p.senderName.charAt(0)}
+                            {(p.senderName || 'Отправитель').charAt(0)}
                           </div>
                           <div>
                             <div className="flex items-center gap-1">
-                              <span className="text-xs font-medium text-slate-300">{p.senderName}</span>
-                              <UserCheck className="w-3 h-3 text-emerald-400" />
+                              <span className="text-xs font-medium text-slate-300">{p.senderName || 'Отправитель'}</span>
+
                             </div>
-                            <span className="text-[10px] text-slate-500">@{p.senderHandle} • ⭐ {p.senderRating ?? 'нет оценок'}</span>
+                            <span className="text-[10px] text-slate-500">{isTelegramWebApp ? `@${p.senderHandle || 'без username'} • нет оценок` : 'Контакты в Telegram'}</span>
                           </div>
                         </div>
 
                         <div className="flex items-center gap-2">
-                          {p.senderHandle && (
+                          {isTelegramWebApp && p.senderHandle && (
                             <a
                               href={`https://t.me/${p.senderHandle}`}
                               target="_blank"
@@ -543,7 +576,7 @@ export const ConsumerApp: React.FC<ConsumerAppProps> = ({
                               <MessageCircle className="w-3.5 h-3.5" />
                             </a>
                           )}
-                          <button
+                          <TelegramAction isTelegram={isTelegramWebApp} botUrl={botUrl} action={`parcel_${p.id}`}
                             onClick={() => {
                               setSelectedParcel(p);
                               setSelectedTrip(null);
@@ -554,7 +587,7 @@ export const ConsumerApp: React.FC<ConsumerAppProps> = ({
                           >
                             <span>Взять посылку</span>
                             <ChevronRight className="w-3 h-3" />
-                          </button>
+                          </TelegramAction>
                         </div>
                       </div>
                     </div>
@@ -571,12 +604,14 @@ export const ConsumerApp: React.FC<ConsumerAppProps> = ({
                   <span>Найдено: {filteredTrips.length}</span>
                 </div>
 
-                {filteredTrips.length === 0 ? (
+                {loading ? <p role="status" className="text-center p-8 text-slate-400">Загружаем рейсы…</p>
+                  : loadError ? <p className="text-center p-8 text-slate-400">Не удалось загрузить ленту. Нажмите «Повторить».</p>
+                  : filteredTrips.length === 0 ? (
                   <div className="text-center py-12 bg-slate-900/40 rounded-2xl border border-dashed border-slate-800 p-6">
                     <Plane className="w-10 h-10 text-slate-600 mx-auto mb-2" />
                     <p className="text-sm font-medium text-slate-300">Попутчиков не найдено</p>
                     <p className="text-xs text-slate-500 mt-1">Опубликуйте свою поездку, чтобы другие могли передать посылку</p>
-                    <button
+                    <TelegramAction isTelegram={isTelegramWebApp} botUrl={botUrl} action="post_trip"
                       onClick={() => {
                         setPostType('trip');
                         setActiveTab('post');
@@ -584,7 +619,7 @@ export const ConsumerApp: React.FC<ConsumerAppProps> = ({
                       className="mt-4 px-4 py-2 bg-sky-500 text-white rounded-xl text-xs font-medium cursor-pointer"
                     >
                       + Я лечу / еду
-                    </button>
+                    </TelegramAction>
                   </div>
                 ) : (
                   filteredTrips.map(t => (
@@ -623,21 +658,21 @@ export const ConsumerApp: React.FC<ConsumerAppProps> = ({
                       <div className="flex items-center justify-between pt-1">
                         <div className="flex items-center gap-2">
                           <div className="w-6 h-6 rounded-full bg-emerald-500/20 text-emerald-300 text-xs font-bold flex items-center justify-center border border-emerald-500/30">
-                            {t.userName.charAt(0)}
+                            {(t.userName || 'Попутчик').charAt(0)}
                           </div>
                           <div>
                             <div className="flex items-center gap-1">
-                              <span className="text-xs font-medium text-slate-300">{t.userName}</span>
-                              <UserCheck className="w-3 h-3 text-emerald-400" />
+                              <span className="text-xs font-medium text-slate-300">{t.userName || 'Попутчик'}</span>
+
                             </div>
                             <span className="text-[10px] text-slate-500">
-                              @{t.userHandle} • ⭐ {t.userRating ?? 'нет оценок'} ({t.completedTrips} доставок)
+                              {isTelegramWebApp ? `@${t.userHandle || 'без username'} (${t.completedTrips || 0} доставок)` : 'Контакты в Telegram'}
                             </span>
                           </div>
                         </div>
 
                         <div className="flex items-center gap-2">
-                          {t.userHandle && (
+                          {isTelegramWebApp && t.userHandle && (
                             <a
                               href={`https://t.me/${t.userHandle}`}
                               target="_blank"
@@ -648,7 +683,7 @@ export const ConsumerApp: React.FC<ConsumerAppProps> = ({
                               <MessageCircle className="w-3.5 h-3.5" />
                             </a>
                           )}
-                          <button
+                          <TelegramAction isTelegram={isTelegramWebApp} botUrl={botUrl} action={`trip_${t.id}`}
                             onClick={() => {
                               setSelectedTrip(t);
                               setSelectedParcel(null);
@@ -659,7 +694,7 @@ export const ConsumerApp: React.FC<ConsumerAppProps> = ({
                           >
                             <span>Передать попутчику</span>
                             <ChevronRight className="w-3 h-3" />
-                          </button>
+                          </TelegramAction>
                         </div>
                       </div>
                     </div>
@@ -671,7 +706,7 @@ export const ConsumerApp: React.FC<ConsumerAppProps> = ({
         )}
 
         {/* ======================= TAB 2: POST WIZARD ======================= */}
-        {activeTab === 'post' && (
+        {isTelegramWebApp && activeTab === 'post' && (
           <div className="space-y-4">
             <div className="bg-slate-900/80 p-3 rounded-2xl border border-slate-800/80 text-center">
               <h2 className="text-base font-bold text-white">Разместить объявление</h2>
@@ -876,7 +911,7 @@ export const ConsumerApp: React.FC<ConsumerAppProps> = ({
         )}
 
         {/* ======================= TAB 3: DEALS & MATCHES ======================= */}
-        {activeTab === 'deals' && (
+        {isTelegramWebApp && activeTab === 'deals' && (
           <div className="space-y-3.5">
             <div className="bg-slate-900/80 p-3 rounded-2xl border border-slate-800/80">
               <div className="flex items-center justify-between gap-2">
@@ -1048,11 +1083,11 @@ export const ConsumerApp: React.FC<ConsumerAppProps> = ({
             <div className="p-3 bg-slate-900/80 rounded-2xl border border-slate-800 text-center">
               <p className="text-xs text-slate-400 mb-2">Остались вопросы или нужна помощь?</p>
               <a
-                href="mailto:support@flyparcel.app"
+                href={botLink(botUrl, 'support')}
                 className="inline-flex items-center gap-1.5 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium rounded-xl border border-slate-700 transition-all"
               >
                 <HelpCircle className="w-3.5 h-3.5 text-sky-400" />
-                <span>Служба поддержки FlyParcel</span>
+                <span>Открыть бота в Telegram</span>
               </a>
             </div>
           </div>
@@ -1072,7 +1107,7 @@ export const ConsumerApp: React.FC<ConsumerAppProps> = ({
             <span className="text-[10px]">Лента</span>
           </button>
 
-          <button
+          <TelegramAction isTelegram={isTelegramWebApp} botUrl={botUrl} action={`post_${postType}`}
             onClick={() => setActiveTab('post')}
             className={`flex flex-col items-center justify-center py-1.5 rounded-xl transition-all cursor-pointer ${
               activeTab === 'post' ? 'text-sky-400 font-semibold' : 'text-slate-500 hover:text-slate-300'
@@ -1082,9 +1117,9 @@ export const ConsumerApp: React.FC<ConsumerAppProps> = ({
               <Plus className="w-4 h-4" />
             </div>
             <span className="text-[10px]">Создать</span>
-          </button>
+          </TelegramAction>
 
-          <button
+          <TelegramAction isTelegram={isTelegramWebApp} botUrl={botUrl} action="deals"
             onClick={() => setActiveTab('deals')}
             className={`flex flex-col items-center justify-center py-1.5 rounded-xl relative transition-all cursor-pointer ${
               activeTab === 'deals' ? 'text-sky-400 font-semibold' : 'text-slate-500 hover:text-slate-300'
@@ -1097,7 +1132,7 @@ export const ConsumerApp: React.FC<ConsumerAppProps> = ({
             )}
             <Briefcase className="w-5 h-5 mb-0.5" />
             <span className="text-[10px]">Сделки</span>
-          </button>
+          </TelegramAction>
 
           <button
             onClick={() => setActiveTab('safety')}
@@ -1112,7 +1147,7 @@ export const ConsumerApp: React.FC<ConsumerAppProps> = ({
       </nav>
 
       {/* ======================= MATCH / INSPECTION MODAL ======================= */}
-      {matchModalOpen && (
+      {isTelegramWebApp && matchModalOpen && (
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4">
           <div className="bg-slate-900 border border-slate-800 rounded-t-3xl sm:rounded-2xl max-w-md w-full p-5 space-y-4 shadow-2xl animate-in slide-in-from-bottom">
             <div className="flex items-center justify-between pb-2 border-b border-slate-800">

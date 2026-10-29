@@ -44,6 +44,11 @@ const data = await response.json();
 if (!response.ok || data.parcels.length !== 1 || data.parcels[0].description !== 'CI container test') {
   throw Error('Shared data missing: ' + JSON.stringify(data));
 }
+const publicResponse = await fetch(base + '/api/public/parcels');
+const publicData = await publicResponse.json();
+if (!publicResponse.ok || publicData.parcels.length !== 1 || 'senderId' in publicData.parcels[0] || 'senderHandle' in publicData.parcels[0]) {
+  throw Error('Public feed unavailable or exposes contacts');
+}
 const site = await fetch(base + '/');
 if (!site.ok || !(await site.text()).includes('id="root"')) throw Error('Frontend HTML unavailable');
 console.log(mode === 'create' ? 'Containers: health, authorization, creation and frontend OK' : 'Container restart: data persisted');
