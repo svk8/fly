@@ -16,6 +16,10 @@ class Settings(BaseSettings):
     )
     ADMIN_IDS_RAW: str = Field(default="", alias="ADMIN_IDS")
     WEBAPP_URL: str = Field(default="", validation_alias=AliasChoices("APP_URL", "WEBAPP_URL"))
+    GLITCHTIP_DSN: str = ""
+    GLITCHTIP_FRONTEND_DSN: str = ""
+    MONITORING_ENVIRONMENT: str = "development"
+    RELEASE: str = "development"
     API_HOST: str = "0.0.0.0"
     API_PORT: int = 8000
     BOT_POLLING: bool = True

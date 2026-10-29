@@ -5,13 +5,14 @@ import random
 import uuid
 from datetime import datetime, timedelta
 from sqlalchemy import select, update, or_, and_
-from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError, TelegramRetryAfter, TelegramMigrateToChat
+from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError, TelegramRetryAfter, TelegramMigrateToChat, TelegramNetworkError, TelegramServerError
 from database.db import get_db_session
 from database.models import NotificationJob, User, TravelTrip, ParcelRequest, DeliveryDeal, TripStatus, ParcelStatus
 from services.clock import today
 from services.notifications import enqueue
 from keyboards.inline import get_match_action_keyboard, get_tma_launch_inline_keyboard
 from config import settings
+from monitoring import report_exception
 
 logger = logging.getLogger(__name__)
 
@@ -144,8 +145,13 @@ class NotificationWorker:
             raise
         except (TelegramForbiddenError, TelegramBadRequest) as error:
             await self._finish(job, status='failed', last_error=type(error).__name__)
+            if isinstance(error, TelegramBadRequest):
+                report_exception(error, 'notification_delivery')
             logger.warning('Notification %s permanently failed: %s', job.id, type(error).__name__)
         except Exception as error:
+            transient = isinstance(error, (TelegramRetryAfter, TelegramNetworkError, TelegramServerError, ConnectionError, TimeoutError))
+            if not transient or job.attempts == 5:
+                report_exception(error, 'notification_job')
             delay = min(3600, 5 * 2 ** min(job.attempts - 1, 10)) + random.uniform(0, 1)
             if isinstance(error, TelegramRetryAfter):
                 delay = max(delay, error.retry_after + 1)
@@ -165,6 +171,7 @@ class NotificationWorker:
                     await asyncio.sleep(.05)
                     continue
             except Exception as error:
+                report_exception(error, 'notification_worker')
                 logger.error('Notification worker error: %s', type(error).__name__)
             try:
                 await asyncio.wait_for(self.stopped.wait(), timeout=1)

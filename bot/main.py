@@ -20,6 +20,7 @@ from services.scheduler import start_scheduler, stop_scheduler
 from middleware import AccountMiddleware
 from api import create_api
 from services.notification_worker import NotificationWorker
+from monitoring import init_monitoring, report_exception, flush_monitoring
 
 logging.basicConfig(level=logging.DEBUG if settings.DEBUG else logging.INFO,
     format="%(asctime)s | %(levelname)s | %(name)s - %(message)s")
@@ -31,6 +32,12 @@ async def main():
     dp = Dispatcher(storage=DatabaseStorage(), events_isolation=SimpleEventIsolation())
     dp.message.outer_middleware(AccountMiddleware())
     dp.callback_query.outer_middleware(AccountMiddleware())
+    @dp.errors()
+    async def handle_error(event):
+        report_exception(event.exception, 'bot')
+        logging.error('Bot handler failed', exc_info=(type(event.exception), event.exception, event.exception.__traceback__))
+        return True
+
     for router in (common_router, admin_router, traveler_router, sender_router, matching_router):
         dp.include_router(router)
     worker = NotificationWorker(bot)
@@ -68,4 +75,11 @@ async def main():
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    init_monitoring()
+    try:
+        asyncio.run(main())
+    except Exception as error:
+        report_exception(error, 'startup')
+        raise
+    finally:
+        flush_monitoring()

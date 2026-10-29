@@ -432,5 +432,26 @@ asyncio.run(check())
         self.bot.send_message.assert_not_called()
 
 
+    async def test_monitoring_client_config_is_public_and_has_no_private_settings(self):
+        status, data = await self.call('client-config', user=None)
+        self.assertEqual(status, 200)
+        self.assertEqual(set(data), {'dsn', 'environment', 'release'})
+        self.assertNotIn(TOKEN, json.dumps(data))
+
+    async def test_monitoring_scrubs_auth_request_and_local_variables(self):
+        from monitoring import sanitize_event
+        event = {'request': {'data': 'parcel content', 'headers': {'Authorization': TOKEN}},
+            'user': {'id': 1}, 'breadcrumbs': [{'message': 'private message'}], 'extra': {'initData': 'secret'},
+            'exception': {'values': [{'type': 'RuntimeError', 'value': f'bot{TOKEN}/sendMessage initData=secret',
+                'stacktrace': {'frames': [{'filename': '/app/test.py', 'vars': {'token': TOKEN}}]}}]}}
+        clean = sanitize_event(event)
+        encoded = json.dumps(clean)
+        self.assertNotIn(TOKEN, encoded)
+        self.assertNotIn('parcel content', encoded)
+        self.assertNotIn('private message', encoded)
+        self.assertNotIn('secret', encoded)
+        self.assertEqual(clean['exception']['values'][0]['type'], 'RuntimeError')
+
+
 if __name__ == '__main__':
     unittest.main()

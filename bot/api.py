@@ -19,6 +19,7 @@ from database.models import (User, TravelTrip, ParcelRequest, TripDetails, Parce
 from services.marketplace import create_response, change_status, MarketplaceError
 from services.matcher import normalize_city
 from services.notifications import enqueue_listing
+from monitoring import report_exception
 
 logger = logging.getLogger(__name__)
 
@@ -122,7 +123,7 @@ def create_api(bot):
     @web.middleware
     async def middleware(request, handler):
         try:
-            if request.path == "/api/health":
+            if request.path in ("/api/health", "/api/client-config"):
                 return await handler(request)
             tg = verify_init_data(request.headers.get("X-Telegram-Init-Data", ""), settings.BOT_TOKEN)
             request["user"] = await ensure_user(tg)
@@ -150,6 +151,7 @@ def create_api(bot):
         except web.HTTPException as error:
             return web.json_response({"error": "Метод не найден." if error.status == 404 else error.reason}, status=error.status)
         except Exception as error:
+            report_exception(error, "api")
             logger.error("API request failed: %s", type(error).__name__)
             return web.json_response({"error": "Сервис временно недоступен."}, status=500)
 
@@ -256,6 +258,12 @@ def create_api(bot):
             data = await deal_json(session, item)
         return web.json_response({"deal": data})
 
+    async def client_config(request):
+        return web.json_response({'dsn': settings.GLITCHTIP_FRONTEND_DSN,
+            'environment': settings.MONITORING_ENVIRONMENT, 'release': settings.RELEASE},
+            headers={'Cache-Control': 'no-store'})
+
+    app.router.add_get('/api/client-config', client_config)
     app.router.add_get('/api/health', health)
     app.router.add_get('/api/{kind:trips|parcels}', listings)
     app.router.add_post('/api/{kind:trips|parcels}', create_listing)
