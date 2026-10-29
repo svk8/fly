@@ -53,8 +53,10 @@ if [[ -n "$previous" && -f "$previous/compose.yaml" ]]; then
   old=(docker compose --project-name "$project" --env-file "$root/shared/.env" --project-directory "$previous" -f "$previous/compose.yaml")
   if [[ "$profile" == production ]]; then old+=(--profile production); fi
   if FLYPARCEL_RELEASE="$(basename "$previous")" "${old[@]}" ps --status running --services | grep -qx bot; then
-    FLYPARCEL_RELEASE="$(basename "$previous")" "${old[@]}" exec -T bot python backup.py
+    FLYPARCEL_RELEASE="$(basename "$previous")" "${old[@]}" exec -T bot python backup.py </dev/null
   fi
+elif "${compose[@]}" ps --status running --services | grep -qx bot; then
+  "${compose[@]}" exec -T bot python backup.py </dev/null
 fi
 rollback() {
   trap - ERR
@@ -75,7 +77,7 @@ rollback() {
 }
 trap rollback ERR
 "${compose[@]}" up -d --no-build --wait --wait-timeout 180
-"${compose[@]}" exec -T app node -e "fetch('http://127.0.0.1:3000/api/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"
+"${compose[@]}" exec -T app node -e "fetch('http://127.0.0.1:3000/api/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))" </dev/null
 if [[ "$profile" == shared ]]; then
   edge=${DEPLOY_EDGE_PATH:-/opt/bots-edge}
   [[ -f "$edge/compose.yaml" && -d "$edge/sites" ]] || { echo 'Shared HTTPS proxy is not prepared' >&2; false; }
@@ -99,8 +101,8 @@ PYDOMAIN
   printf '%s {\n    encode gzip\n    reverse_proxy %s-app:3000\n}\n' "$domain" "$project" > "$route.new"
   mv -f "$route.new" "$route"
   docker compose --project-name bots-edge -f "$edge/compose.yaml" up -d --wait
-  docker compose --project-name bots-edge -f "$edge/compose.yaml" exec -T proxy caddy validate --config /etc/caddy/Caddyfile
-  docker compose --project-name bots-edge -f "$edge/compose.yaml" exec -T proxy caddy reload --config /etc/caddy/Caddyfile
+  docker compose --project-name bots-edge -f "$edge/compose.yaml" exec -T proxy caddy validate --config /etc/caddy/Caddyfile </dev/null
+  docker compose --project-name bots-edge -f "$edge/compose.yaml" exec -T proxy caddy reload --config /etc/caddy/Caddyfile </dev/null
   curl --fail --silent --show-error --retry 12 --retry-delay 5 --retry-all-errors --max-time 15 "https://$domain/api/health"
 fi
 ln -sfn "$release" "$root/current.next"

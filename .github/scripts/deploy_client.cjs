@@ -49,9 +49,15 @@ async function work() {
       sourceStream.pipe(destStream);
     });
     await call(handle,'rename',target + '.upload',target);
+    if (!uploadEnv) {
+      await call(handle,'fastPut','deploy/deploy.sh',root + '/incoming/' + sha + '.deploy.sh', {mode:0o600});
+    }
   } finally { handle.end(); }
   if (!uploadEnv) {
-    await exec(`bash -s -- ${[root,sha,profile,project].map(quote).join(' ')}`, fs.readFileSync('deploy/deploy.sh'));
+    // Run a file, not `bash -s`: docker compose exec may otherwise consume the rest of stdin.
+    const script = root + '/incoming/' + sha + '.deploy.sh';
+    await exec(`bash ${quote(script)} ${[root,sha,profile,project].map(quote).join(' ')} && test "$(cat ${quote(root + '/deployed-sha')})" = ${quote(sha)}`);
+    await exec(`rm -f ${quote(script)}`);
   } else console.log('Server configuration uploaded without displaying its contents.');
 }
 client.on('ready', () => work().then(() => client.end()).catch(error => { console.error(error.message); process.exitCode=1; client.end(); }));

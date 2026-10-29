@@ -34,6 +34,7 @@ class DeploymentTests(unittest.TestCase):
         docker.write_text('''#!/usr/bin/env python3
 import json,os,sys
 args=sys.argv[1:]
+if 'exec' in args: sys.stdin.read()
 with open(os.environ['TEST_LOG'],'a') as log:
  log.write(json.dumps({'args':args,'release':os.environ.get('FLYPARCEL_RELEASE'),'project':os.environ.get('COMPOSE_PROJECT_NAME')})+'\\n')
 if 'ps' in args and '--services' in args: print('bot')
@@ -102,3 +103,10 @@ if failure and failure in args and os.environ.get('FLYPARCEL_RELEASE')=='a'*40: 
         (self.root/'shared/.env').write_text('BOT_TOKEN=123456:TEST_TOKEN\nAPP_URL=\nDOMAIN=localhost\n')
         self.assertNotEqual(self.deploy('production').returncode,0)
         self.assertEqual(self.calls(),[])
+
+
+    def test_ssh_stdin_cannot_be_consumed_by_compose_exec(self):
+        result=subprocess.run(['bash','-s','--',str(self.root),NEW,'local','delivery'],
+            input=SCRIPT.read_text(),env=self.env,capture_output=True,text=True)
+        self.assertEqual(result.returncode,0,result.stderr)
+        self.assertEqual((self.root/'deployed-sha').read_text().strip(),NEW)
