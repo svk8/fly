@@ -81,6 +81,9 @@ trap rollback ERR
 if [[ "$profile" == shared ]]; then
   edge=${DEPLOY_EDGE_PATH:-/opt/bots-edge}
   [[ -f "$edge/compose.yaml" && -d "$edge/sites" ]] || { echo 'Shared HTTPS proxy is not prepared' >&2; false; }
+  # Different bot repositories may deploy concurrently: serialize changes to the shared proxy.
+  exec 8>"$edge/deploy.lock"
+  flock -w 300 8 || { echo "Shared proxy is busy" >&2; false; }
   domain=$(python3 - "$root/shared/.env" <<'PYDOMAIN'
 from pathlib import Path
 import re,sys
