@@ -76,6 +76,8 @@ jobs:
         run: docker compose config --quiet
       - name: Validate production Compose
         run: docker compose --profile production config --quiet
+      - name: Validate health-only proxy logging
+        run: docker run --rm -e DOMAIN=delivery.example.com -v "$PWD/deploy:/config:ro" caddy:2-alpine caddy validate --config /config/Caddyfile
       - name: Build bot image
         run: docker build --target bot --tag flyparcel-ci:bot .
       - name: Build web image

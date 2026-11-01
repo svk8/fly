@@ -101,7 +101,33 @@ PYDOMAIN
     docker network connect --alias "$project-app" bots-edge "$container"
   fi
   route="$edge/sites/$project.caddy"
-  printf '%s {\n    encode gzip\n    reverse_proxy %s-app:3000\n}\n' "$domain" "$project" > "$route.new"
+  cat > "$route.new" <<CADDY
+$domain {
+    @not_health not path /api/health
+    log_skip @not_health
+    log {
+        output file /data/health/$project.jsonl {
+            roll_size 5MiB
+            roll_keep 4
+            roll_keep_for 168h
+        }
+        format filter {
+            wrap json
+            fields {
+                request delete
+                resp_headers delete
+            }
+        }
+    }
+    log_append request_id {http.request.uuid}
+    log_append upstream_duration_ms {rp.upstream.duration_ms}
+    log_append upstream_latency_ms {rp.upstream.latency_ms}
+    encode gzip
+    reverse_proxy $project-app:3000 {
+        header_up X-Request-ID {http.request.uuid}
+    }
+}
+CADDY
   mv -f "$route.new" "$route"
   docker compose --project-name bots-edge -f "$edge/compose.yaml" up -d --wait
   docker compose --project-name bots-edge -f "$edge/compose.yaml" exec -T proxy caddy validate --config /etc/caddy/Caddyfile </dev/null

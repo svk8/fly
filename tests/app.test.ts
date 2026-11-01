@@ -32,3 +32,43 @@ test('web proxy preserves signed authorization, body and Python status; backend 
     await close(webServer);
   }
 });
+
+test('health diagnostics correlate stages without logging credentials or request payloads', async () => {
+  const records: Array<Record<string, unknown>> = [];
+  let forwardedId = '';
+  const backend = createServer((req, res) => {
+    forwardedId = String(req.headers['x-request-id'] || '');
+    res.setHeader('Server-Timing', 'db_pool;dur=1.2, db_query;dur=0.3, backend;dur=2');
+    res.end('{"status":"ok"}');
+  });
+  const backendPort = await listen(backend);
+  const webServer = createServer(createApp(`http://127.0.0.1:${backendPort}`, record => records.push(record)));
+  const port = await listen(webServer);
+  try {
+    const id = '8ce3ff7f-36d3-4599-8553-e21c3c457a98';
+    const response = await fetch(`http://127.0.0.1:${port}/api/health?initData=private-query`, {
+      headers: {'X-Request-ID': id, 'X-Telegram-Init-Data': 'private-auth', 'Cookie': 'private-cookie'}
+    });
+    await response.text();
+    assert.equal(response.headers.get('X-Request-ID'), id);
+    assert.ok(response.headers.get('Server-Timing')?.includes('db_query;dur=0.3'));
+    assert.equal(forwardedId, id);
+    assert.equal(records.length, 1);
+    assert.equal(records[0].event, 'health_proxy');
+    assert.equal(records[0].db_pool_ms, 1.2);
+    assert.equal(records[0].db_query_ms, 0.3);
+    assert.equal(records[0].status, 200);
+    assert.ok(!JSON.stringify(records).includes('private-'));
+    await (await fetch(`http://127.0.0.1:${port}/api/parcels`)).text();
+    assert.equal(records.length, 1);
+    await close(backend);
+    const failure = await fetch(`http://127.0.0.1:${port}/api/health`);
+    await failure.text();
+    assert.equal(failure.status, 503);
+    assert.equal(records[1].status, 503);
+    assert.ok(records[1].error_kind);
+  } finally {
+    if (backend.listening) await close(backend);
+    await close(webServer);
+  }
+});

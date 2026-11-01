@@ -7,6 +7,7 @@ import logging
 import math
 import re
 import time
+import uuid
 from datetime import date, datetime
 from urllib.parse import parse_qsl
 from aiohttp import web
@@ -165,9 +166,28 @@ def create_api(bot):
     app[BOT_URL] = "https://t.me/" + settings.BOT_USERNAME.lstrip("@")
 
     async def health(request):
-        async with get_db_session() as session:
-            await session.execute(sql_text("SELECT 1"))
-        return web.json_response({"status": "ok"})
+        started = time.perf_counter()
+        try:
+            correlation = str(uuid.UUID(request.headers.get('X-Request-ID', '')))
+        except (ValueError, AttributeError):
+            correlation = str(uuid.uuid4())
+        pool_ms = query_ms = None
+        ok = False
+        try:
+            async with get_db_session() as session:
+                phase = time.perf_counter()
+                await session.connection()
+                pool_ms = round((time.perf_counter() - phase) * 1000, 2)
+                phase = time.perf_counter()
+                await session.execute(sql_text("SELECT 1"))
+                query_ms = round((time.perf_counter() - phase) * 1000, 2)
+            ok = True
+        finally:
+            total_ms = round((time.perf_counter() - started) * 1000, 2)
+            logger.info(json.dumps({'event': 'health_backend', 'request_id': correlation,
+                'ok': ok, 'total_ms': total_ms, 'db_pool_ms': pool_ms, 'db_query_ms': query_ms}))
+        return web.json_response({"status": "ok"}, headers={'X-Request-ID': correlation,
+            'Server-Timing': f'db_pool;dur={pool_ms}, db_query;dur={query_ms}, backend;dur={total_ms}'})
 
     async def listings(request):
         kind = request.match_info["kind"]

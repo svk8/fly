@@ -1,0 +1,12 @@
+[Unit]
+Description=Sample Delivery DNS TCP TLS and HTTP timings every minute
+
+[Timer]
+OnCalendar=*-*-* *:*:00
+RandomizedDelaySec=5
+AccuracySec=1s
+Persistent=yes
+Unit=delivery-health-probe.service
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,19 @@
+[Unit]
+Description=Delivery independent HTTPS timing diagnostics
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+DynamicUser=yes
+User=delivery-health-probe
+ExecStart=/usr/bin/python3 /opt/monitoring-diagnostics/delivery_health_probe.py --url https://delivery.bantr.ru/api/health
+TimeoutStartSec=35
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=delivery-health-probe

@@ -244,3 +244,34 @@ GET /api/public/parcels и /api/public/trips доступны без входа.
 Веб-страница запрашивает только публичные карточки. Кнопки «Создать», «Сделки», отклика и контактов открывают бота, а не отправляют запросы без авторизации. Ссылки вида `?start=parcel_42` сохраняют выбранную карточку: после принятия правил бот предлагает открыть ее в Mini App. Приватные GET /api/parcels, /api/trips, /api/deals и все операции записи по-прежнему проверяют Telegram initData.
 
 Адрес бота возвращается публичным /api/client-config в поле botUrl. При запуске он определяется через getMe, без раскрытия BOT_TOKEN. BOT_USERNAME служит только запасным значением для тестового запуска без polling.
+
+
+## Диагностика кратких сбоев health
+
+Для монитора GlitchTip Delivery API (id=52) установлен confirmation_threshold=2: каждый неуспешный запрос сохраняется в истории, но статус Down и уведомление возникают только после двух подряд. Первый успешный запрос сразу возвращает Up. Интервал 60 секунд и таймаут 20 секунд сохранены.
+
+Для GET /api/health сохраняются только технические поля:
+
+- Caddy: ID запроса, статус, общее время, длительность/ожидание upstream. Другие URL не логируются; весь request и response headers удалены из access-лога. Файлы `/data/health/delivery.jsonl` в общем прокси ротируются: 5 MiB на файл, до 4 архивов; архивы старше 7 дней удаляются.
+- Node: JSON event=health_proxy с тем же UUID, временем получения заголовков backend, общим временем и признаком оборванного клиентом запроса. URL, query, cookies, auth-заголовки и тела исключены.
+- Python: JSON event=health_backend с UUID, временем получения соединения БД (db_pool_ms), выполнения SELECT 1 (db_query_ms) и общим временем.
+- Ответ health включает X-Request-ID и числовой Server-Timing. Формат JSON тела прежний, чтобы не менять условия uptime-проверки.
+
+На сервере мониторинга независимый systemd timer delivery-health-probe запускает `/opt/monitoring-diagnostics/delivery_health_probe.py` раз в минуту с отдельным динамическим непривилегированным пользователем systemd. Он записывает этапы DNS/TCP/TLS/первого байта/полного ответа, curl exit code, HTTP status и тот же request ID. Probe не меняет статус GlitchTip и не отправляет уведомления. Его скрипт и unit-файлы находятся в deploy/health_probe.py и deploy/diagnostics/.
+
+Диагностика:
+
+```bash
+# На сервере мониторинга
+journalctl -u delivery-health-probe.service --since '1 hour ago' -o cat
+systemctl status delivery-health-probe.timer
+
+# На сервере приложения
+docker logs --since 1h delivery-app-1
+docker logs --since 1h delivery-bot-1
+docker exec bots-edge-proxy-1 tail -20 /data/health/delivery.jsonl
+```
+
+Если внешняя проверка зависла, а соответствующего запроса нет у Caddy, задержка возникла до HTTP-обработчика (или в процессе самой проверки). Если запрос есть, сравните duration Caddy, total_ms Node и db_pool_ms/db_query_ms Python. Это позволяет локализовать следующий сбой; сами новые логи еще не доказывают причину прошлых таймаутов.
+
+Для ручного запуска независимой проверки: `python3 deploy/health_probe.py`. Для остановки сбора на сервере мониторинга: `sudo systemctl disable --now delivery-health-probe.timer`.

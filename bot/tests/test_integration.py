@@ -513,5 +513,23 @@ asyncio.run(check())
         self.assertEqual(await context.get_data(), {})
 
 
+    async def test_health_timing_logs_do_not_include_authorization_or_query(self):
+        import uuid
+        with self.assertLogs('api', level='INFO') as captured:
+            response = await self.client.get('/api/health?initData=private-query', headers={
+                'X-Telegram-Init-Data': 'private-auth', 'Cookie': 'private-cookie', 'X-Request-ID': 'private-id'})
+            self.assertEqual(response.status, 200)
+            self.assertEqual(await response.json(), {'status': 'ok'})
+            self.assertIn('db_pool;dur=', response.headers['Server-Timing'])
+            self.assertIn('db_query;dur=', response.headers['Server-Timing'])
+            correlation = response.headers['X-Request-ID']
+            uuid.UUID(correlation)
+        record = json.loads(captured.records[-1].getMessage())
+        self.assertEqual(record['request_id'], correlation)
+        self.assertTrue(record['ok'])
+        self.assertIsNotNone(record['db_query_ms'])
+        self.assertNotIn('private-', json.dumps(record))
+
+
 if __name__ == '__main__':
     unittest.main()
